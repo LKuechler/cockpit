@@ -86,7 +86,18 @@ function ServiceRow(props) {
     ];
 
     var tabs = [
-        { name: _("Details"), renderer: () => <p>{props.service.description}</p> }
+        { name: _("Details"), renderer: () => <p>{props.service.description}</p> },
+        { name: _("Zones"), renderer: () => (
+            <ul>
+                {props.service.zones.map(zone => {
+                    return (
+                        <li key={zone.name}>
+                            {zone.name}
+                        </li>
+                    );
+                })}
+            </ul>
+        ) }
     ];
 
     return <ListingRow key={props.service.id}
@@ -127,21 +138,25 @@ class AddServicesBody extends React.Component {
 
         this.state = {
             services: null,
+            zones: null,
             selected: new Set(),
+            selectedZones: new Set(),
             filter: ""
         };
 
         this.save = this.save.bind(this);
         this.onFilterChanged = this.onFilterChanged.bind(this);
         this.onToggleService = this.onToggleService.bind(this);
+        this.onToggleZone = this.onToggleZone.bind(this);
     }
 
     save() {
-        firewall.addServices([...this.state.selected]);
+        firewall.addServices({ services: [...this.state.selected], zones: [...this.state.selectedZones] });
         this.props.close();
     }
 
     componentDidMount() {
+        this.setState({ zones: firewall.zones });
         firewall.getAvailableServices()
                 .then(services => this.setState({ services: services }));
     }
@@ -164,6 +179,24 @@ class AddServicesBody extends React.Component {
 
             return {
                 selected: selected
+            };
+        });
+    }
+
+    onToggleZone(event) {
+        var zone = event.target.getAttribute("data-id");
+        var enabled = event.target.checked;
+
+        this.setState(oldState => {
+            let selectedZones = new Set(oldState.selectedZones);
+
+            if (enabled)
+                selectedZones.add(zone);
+            else
+                selectedZones.delete(zone);
+
+            return {
+                selectedZones: selectedZones
             };
         });
     }
@@ -215,6 +248,46 @@ class AddServicesBody extends React.Component {
                             ))
                         }
                     </ul>
+                    <table className="form-table-ct">
+                        <tbody>
+                            <tr>
+                                <td>
+                                    <label htmlFor="filter-zones-input" className="control-label">
+                                        {_("Filter Zones")}
+                                    </label>
+                                </td>
+                                <td>
+                                    <SearchInput id="filter-zones-input"
+                                                 className="form-control"
+                                                 onChange={this.onZonesFilterChanged} />
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <ul className="list-group dialog-list-ct">
+                        {
+                            this.state.zones && Object.keys(this.state.zones).map(key => {
+                                const zone = this.state.zones[key];
+
+                                if (!zone.interfaces.length) {
+                                    return;
+                                }
+
+                                return (
+                                    <li key={zone.name} className="list-group-item">
+                                        <label>
+                                            <input data-id={zone.name}
+                                                type="checkbox"
+                                                checked={this.state.selectedZones.has(zone.name)}
+                                                onChange={this.onToggleZone} />
+                                            &nbsp;
+                                            <span>{zone.name}</span>
+                                        </label>
+                                    </li>
+                                );
+                            })
+                        }
+                    </ul>
                 </Modal.Body>
             );
         } else {
@@ -246,21 +319,126 @@ class AddServicesBody extends React.Component {
     }
 }
 
+class ZonesBody extends React.Component {
+    constructor() {
+        super();
+
+        this.state = {
+            selectedInterfaces: new Set(),
+            allInterfaces: []
+        };
+
+        this.save = this.save.bind(this);
+        this.onToggleInterface = this.onToggleInterface.bind(this);
+    }
+
+    componentDidMount() {
+        this.setState({ selectedInterfaces: new Set(this.props.zone.interfaces) });
+        cockpit.spawn(['sh', '-c', 'ip -json link'])
+                .done(reply => {
+                    const interfaces = JSON.parse(reply);
+                    this.setState({
+                        allInterfaces: interfaces.map(interfaceItem => interfaceItem.ifname)
+                    });
+                });
+    }
+
+    save() {
+        this.props.zone.interfaces.forEach(existingInterface => {
+            if (this.state.selectedInterfaces.has(existingInterface)) {
+                return;
+            }
+
+            firewall.removeInterfaceFromZone(existingInterface, this.props.zone.name, this.props.zone.path);
+        });
+
+        this.state.selectedInterfaces.forEach(selectedInterface => {
+            if (this.props.zone.interfaces.includes(selectedInterface)) {
+                return;
+            }
+
+            firewall.addInterfaceToZone(selectedInterface, this.props.zone.name, this.props.zone.path);
+        });
+
+        this.props.close();
+    }
+
+    onToggleInterface(event) {
+        var interfaceId = event.target.getAttribute("data-id");
+        var enabled = event.target.checked;
+
+        this.setState(oldState => {
+            let selectedInterfaces = new Set(oldState.selectedInterfaces);
+
+            if (enabled)
+                selectedInterfaces.add(interfaceId);
+            else
+                selectedInterfaces.delete(interfaceId);
+
+            return {
+                selectedInterfaces
+            };
+        });
+    }
+
+    render() {
+        return (
+            <Modal id="add-services-dialog" show onHide={this.props.close}>
+                <Modal.Header>
+                    <Modal.Title> {this.props.zone.name} </Modal.Title>
+                </Modal.Header>
+                <div id="cockpit_modal_dialog">
+                    <Modal.Body id="add-services-dialog">
+                        <ul className="list-group dialog-list-ct">
+                            {
+                                this.state.allInterfaces.map(interfaceItem => (
+                                    <li key={interfaceItem} className="list-group-item">
+                                        <label>
+                                            <input data-id={interfaceItem}
+                                                type="checkbox"
+                                                checked={this.state.selectedInterfaces.has(interfaceItem)}
+                                                onChange={this.onToggleInterface} />
+                                            &nbsp;
+                                            <span>{interfaceItem}</span>
+                                        </label>
+                                    </li>
+                                ))
+                            }
+                        </ul>
+                    </Modal.Body>
+                </div>
+                <Modal.Footer>
+                    <Button bsStyle='default' className='btn-cancel' onClick={this.props.close}>
+                        {_("Cancel")}
+                    </Button>
+                    <Button bsStyle='primary' onClick={this.save}>
+                        {_("Save Interfaces")}
+                    </Button>
+                </Modal.Footer>
+            </Modal>
+        );
+    }
+}
+
 export class Firewall extends React.Component {
     constructor() {
         super();
 
         this.state = {
-            showModal: false,
+            showServiceModal: false,
+            showZoneModal: false,
             firewall,
-            pendingTarget: null /* `null` for not pending */
+            pendingTarget: null /* `null` for not pending */,
+            activeZone: null
         };
 
         this.onFirewallChanged = this.onFirewallChanged.bind(this);
         this.onSwitchChanged = this.onSwitchChanged.bind(this);
         this.onRemoveService = this.onRemoveService.bind(this);
-        this.open = this.open.bind(this);
-        this.close = this.close.bind(this);
+        this.openServiceModal = this.openServiceModal.bind(this);
+        this.closeServiceModal = this.closeServiceModal.bind(this);
+        this.openZoneModal = this.openZoneModal.bind(this);
+        this.closeZoneModal = this.closeZoneModal.bind(this);
     }
 
     onFirewallChanged() {
@@ -293,12 +471,20 @@ export class Firewall extends React.Component {
         firewall.removeEventListener("changed", this.onFirewallChanged);
     }
 
-    close() {
-        this.setState({ showModal: false });
+    closeServiceModal() {
+        this.setState({ showServiceModal: false });
     }
 
-    open() {
-        this.setState({ showModal: true });
+    openServiceModal() {
+        this.setState({ showServiceModal: true });
+    }
+
+    closeZoneModal() {
+        this.setState({ showZoneModal: false });
+    }
+
+    openZoneModal(zone) {
+        this.setState({ showZoneModal: true, activeZone: zone });
     }
 
     render() {
@@ -327,7 +513,7 @@ export class Firewall extends React.Component {
             );
         } else {
             addServiceAction = (
-                <Button bsStyle="primary" onClick={this.open} className="pull-right">
+                <Button bsStyle="primary" onClick={this.openServiceModal} className="pull-right">
                     {_("Add Services…")}
                 </Button>
             );
@@ -350,18 +536,44 @@ export class Firewall extends React.Component {
                                  enabled={this.state.pendingTarget === null}
                                  onChange={this.onSwitchChanged} />
                 </h1>
-                { enabled && <Listing title={_("Allowed Services")}
-                         columnTitles={[ _("Service"), _("TCP"), _("UDP"), "" ]}
-                         emptyCaption={_("No open ports")}
-                         actions={addServiceAction}>
-                    {
-                        services.map(s => <ServiceRow key={s.id}
-                                                      service={s}
-                                                      readonly={this.state.firewall.readonly}
-                                                      onRemoveService={this.onRemoveService} />)
-                    }
-                </Listing> }
-                { this.state.showModal && <AddServicesBody close={this.close} /> }
+                { enabled &&
+                    <>
+                        <Listing title={_("Allowed Services")}
+                            columnTitles={[ _("Service"), _("TCP"), _("UDP"), "" ]}
+                            emptyCaption={_("No open ports")}
+                            actions={addServiceAction}>
+                            {
+                                services.map(s => <ServiceRow key={s.id}
+                                                            service={s}
+                                                            readonly={this.state.firewall.readonly}
+                                                            onRemoveService={this.onRemoveService} />)
+                            }
+                        </Listing>
+                        <Listing title={_("Zones")}
+                         columnTitles={[ _("Zone"), _("Interfaces"), "" ]}
+                         emptyCaption={_("No zones")}>
+                            {
+                                Object.keys(firewall.zones).map(key => {
+                                    const zone = firewall.zones[key];
+
+                                    return (
+                                        <ListingRow key={zone.name}
+                                            rowId={zone.name}
+                                            columns={[
+                                                { name: zone.name, header: true },
+                                                <div>
+                                                    { JSON.stringify(zone.interfaces) }
+                                                </div>,
+                                                <button className="btn btn-info pficon pficon-edit" onClick={() => this.openZoneModal(zone)} />
+                                            ]} />
+                                    );
+                                })
+                            }
+                        </Listing>
+                    </>
+                }
+                { this.state.showServiceModal && <AddServicesBody close={this.closeServiceModal} /> }
+                { this.state.showZoneModal && <ZonesBody close={this.closeZoneModal} zone={this.state.activeZone} /> }
             </div>
         );
     }

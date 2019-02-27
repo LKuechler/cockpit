@@ -188,7 +188,7 @@ function connection_settings(c) {
  * NetworkManager would use a standard o.fd.DBus.Properties API.
  */
 
-function NetworkManagerModel() {
+export function NetworkManagerModel() {
     /*
      * The NetworkManager model doesn't need proxies in its DBus client.
      * It uses the 'raw' dbus events and methods and constructs its own data
