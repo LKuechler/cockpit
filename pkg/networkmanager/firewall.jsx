@@ -521,6 +521,7 @@ export class Firewall extends React.Component {
 
         var services = [...this.state.firewall.enabledServices].map(id => this.state.firewall.services[id]);
         services.sort((a, b) => a.name.localeCompare(b.name));
+        services = services.filter(service => service !== undefined);
 
         var enabled = this.state.pendingTarget !== null ? this.state.pendingTarget : this.state.firewall.enabled;
 
@@ -543,8 +544,8 @@ export class Firewall extends React.Component {
                             emptyCaption={_("No open ports")}
                             actions={addServiceAction}>
                             {
-                                services.map(s => <ServiceRow key={s.id}
-                                                            service={s}
+                                services.map(service => <ServiceRow key={service.id}
+                                                            service={service}
                                                             readonly={this.state.firewall.readonly}
                                                             onRemoveService={this.onRemoveService} />)
                             }
