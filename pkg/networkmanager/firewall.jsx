@@ -334,7 +334,7 @@ class ZonesBody extends React.Component {
 
     componentDidMount() {
         this.setState({ selectedInterfaces: new Set(this.props.zone.interfaces) });
-        cockpit.spawn(['sh', '-c', 'ip -json link'])
+        cockpit.spawn(['sh', '-c', '(echo -n "["; for i in $(ip link | grep -e "^[0-9]:" | cut -d " " -f 2 | sed "s/://"); do echo -n "{\\"ifname\\": \\"${i}\\"},"; done; echo -n "]") | sed "s/,]/]/g"'])
                 .done(reply => {
                     const interfaces = JSON.parse(reply);
                     this.setState({
